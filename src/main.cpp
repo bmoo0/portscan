@@ -17,6 +17,8 @@ typedef struct port_status {
 
 std::vector<port_status> status;
 std::mutex mtx;
+bool isFinished = false;
+
 
 void usage() {
     std::cout << "usage: portscan <address> [-p <port>] [-r <range_start-range_end>]" << std::endl;
@@ -59,7 +61,6 @@ void scan_port(p_status* pstat) {
     if(sock.socket_connect()) {
         pstat->status = 'o';
     } else {
-        //std::cout << std::setw(6) << "closed";
         pstat->status = 'o';
     }
 
@@ -74,6 +75,11 @@ bool compare_by_port(p_status& a, p_status& b) {
 
 void print_results(std::vector<port_status> stats) {
     std::sort(stats.begin(), stats.end(), compare_by_port);
+
+    std::cout << std::endl << "+----+------+" << std::endl;
+    std::cout << "|Port|Status|" << std::endl;
+    std::cout << "+----+------+" << std::endl;
+
     for(std::vector<port_status>::iterator i = stats.begin(); i != stats.end();i++) {
         std::cout << "|" << std::setw(4) << i->port << "|";
         if (i->status == 'o') {
@@ -83,13 +89,27 @@ void print_results(std::vector<port_status> stats) {
         }
         std::cout << "|" << std::endl;
     }
+
+    std::cout << "+----+------+" << std::endl;
 }
 
 void print_header(const char* addr) {
     std::cout << "Scanning server at address: " << addr << std::endl;
-    std::cout << "+----+------+" << std::endl;
-    std::cout << "|Port|Status|" << std::endl;
-    std::cout << "+----+------+" << std::endl;
+}
+
+void loading_screen() {
+    std::cout << '-' << std::flush;
+    while (!isFinished) {
+        sleep(1);
+        std::cout << "\b\\" << std::flush;
+        sleep(1);
+        std::cout << "\b|" << std::flush;
+        sleep(1);
+        std::cout << "\b/" << std::flush;
+        sleep(1);
+        std::cout << "\b-" << std::flush;
+    }
+    std::cout << std::flush;
 }
 
 
@@ -138,6 +158,7 @@ int main(int argc, char** argv) {
     std::thread threads[num_threads];
     int count = 0;
 
+
     for(int i = *range_start; i <= *range_end; i++) {
         p_status *stat = (p_status *)malloc(sizeof(p_status));
         stat->addr = addr;
@@ -145,6 +166,8 @@ int main(int argc, char** argv) {
         threads[count] = std::thread(scan_port, stat);
         count++;
     }
+
+    std::thread loading_thread(loading_screen);
 
     count = 0;
 
@@ -154,7 +177,9 @@ int main(int argc, char** argv) {
         count++;
     }
 
+    isFinished = true;
+    loading_thread.join();
+
     print_results(status);
 
-    std::cout << "+----+------+" << std::endl;
 }
