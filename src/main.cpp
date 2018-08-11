@@ -6,6 +6,17 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string>
+#include <mutex>
+#include <thread>
+
+typedef struct port_status {
+    int port;
+    char status;
+    char* addr;
+} p_status;
+
+std::vector<port_status> status;
+std::mutex mtx;
 
 void usage() {
     std::cout << "usage: portscan <address> [-p <port>] [-r <range_start-range_end>]" << std::endl;
@@ -26,6 +37,10 @@ std::vector<std::string> split(std::string strToSplit, char delimeter) {
 int get_range_from_arg(std::string input, int* start, int* end) {
     std::vector<std::string> vecs = split(input, '-');
 
+    if (*start > *end) {
+        return -1; // error
+    }
+
     if (vecs.size() != 2) {
         return -1; // error
     }
@@ -38,18 +53,36 @@ int get_range_from_arg(std::string input, int* start, int* end) {
     return 0;
 }
 
-void scan_port(const char* addr, const int* port) {
-    Socket sock(addr, *port);
+void scan_port(p_status* pstat) {
+    Socket sock(pstat->addr, pstat->port);
 
-    //std::cout << "Port: " << *port << " on address: " << addr;
-    std::cout << "|" << std::setw(4) << *port << "|";
     if(sock.socket_connect()) {
-        std::cout << std::setw(6) << "open";
+        pstat->status = 'o';
     } else {
-        std::cout << std::setw(6) << "closed";
+        //std::cout << std::setw(6) << "closed";
+        pstat->status = 'o';
     }
 
-    std::cout << "|" << std::endl;
+    mtx.lock();
+    status.push_back(*pstat);
+    mtx.unlock();
+}
+
+bool compare_by_port(p_status& a, p_status& b) {
+    return a.port < b.port;
+}
+
+void print_results(std::vector<port_status> stats) {
+    std::sort(stats.begin(), stats.end(), compare_by_port);
+    for(std::vector<port_status>::iterator i = stats.begin(); i != stats.end();i++) {
+        std::cout << "|" << std::setw(4) << i->port << "|";
+        if (i->status == 'o') {
+            std::cout << std::setw(6) << "open";
+        } else {
+            std::cout << std::setw(6) << "closed";
+        }
+        std::cout << "|" << std::endl;
+    }
 }
 
 void print_header(const char* addr) {
@@ -59,31 +92,27 @@ void print_header(const char* addr) {
     std::cout << "+----+------+" << std::endl;
 }
 
+
 int main(int argc, char** argv) {
     int opt;
-    int port;
     int singleFlag = 0; // single port
-    int* range_start;
-    int* range_end;
+    int* range_start = (int*)malloc(sizeof(int));
+    int* range_end = (int*)malloc(sizeof(int));
     char* addr;
 
     while((opt = getopt(argc, argv, "p:r:a:")) != -1) {
         switch(opt) {
             case 'p':
                 {
-                    port = atoi(optarg);
+                    *range_start = atoi(optarg);
+                    *range_end = atoi(optarg);
                     singleFlag = 1;
-                    #ifdef _DEBUG
-                    std::cout << "Port passed: " << port << std::endl;
-                    #endif
                     break;
                 }
             case 'r':
                 {
                     if(singleFlag == 1) return 1;
                     std::string arg_str(optarg);
-                    range_start = (int*)malloc(sizeof(int));
-                    range_end =(int*)malloc(sizeof(int));
                     if((get_range_from_arg(arg_str, range_start, range_end)) < 0) {
                         usage();
                         return 1;
@@ -103,16 +132,29 @@ int main(int argc, char** argv) {
         }
     }
 
-    if(singleFlag == 1) {
-        print_header(addr);
-        scan_port(addr, &port);
-        std::cout << "+----+------+" << std::endl;
-    } else {
-        print_header(addr);
+    print_header(addr);
+    int num_threads = *range_end - *range_start;
 
-        for(int i = *range_start; i <= *range_end; i++) {
-            scan_port(addr, &i);
-        }
-        std::cout << "+----+------+" << std::endl;
+    std::thread threads[num_threads];
+    int count = 0;
+
+    for(int i = *range_start; i <= *range_end; i++) {
+        p_status *stat = (p_status *)malloc(sizeof(p_status));
+        stat->addr = addr;
+        stat->port = i;
+        threads[count] = std::thread(scan_port, stat);
+        count++;
     }
+
+    count = 0;
+
+
+    for(int i = *range_start; i <= *range_end; i++) {
+        threads[count].join();
+        count++;
+    }
+
+    print_results(status);
+
+    std::cout << "+----+------+" << std::endl;
 }

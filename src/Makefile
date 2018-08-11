@@ -1,5 +1,6 @@
-CC = g++
-CFLAGS = -g -Wall
+#CC = g++
+CC = clang++
+CFLAGS = -g -Wall -std=c++11
 TARGET = portscan
 SRC_FILES = $(wildcard *.cpp)
 OBJS = ${SRC_FILES:.c=.o}
